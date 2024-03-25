@@ -5,7 +5,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, setup)
-        .add_systems(Update, gravity)
+        .add_systems(Update, (gravity, flap))
         .run();
 }
 
@@ -33,6 +33,7 @@ fn spawn_sprite(
         },
         Mass,
         Velocity::default(),
+        Player,
     ));
 }
 
@@ -50,5 +51,20 @@ fn gravity(
     for (mut velocity, mut transform) in query.iter_mut() {
         velocity.0.y += GRAVITY;
         transform.translation += velocity.0.extend(0.0);
+    }
+}
+
+#[derive(Component)]
+struct Player;
+
+const IMPULSE: f32 = 2.0;
+
+fn flap(
+    mut player: Query<&mut Velocity, With<Player>>,
+    input: Res<ButtonInput<KeyCode>>,
+) {
+    if input.just_pressed(KeyCode::Space) {
+        let mut velocity = player.single_mut();
+        velocity.0.y = IMPULSE;
     }
 }
