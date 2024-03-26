@@ -5,7 +5,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, setup)
-        .add_systems(Update, (gravity, flap))
+        .add_systems(Update, (gravity, flap, hit_ground).run_if(in_state(GameState::InProgress)))
+        .init_state::<GameState>()
         .run();
 }
 
@@ -66,5 +67,25 @@ fn flap(
     if input.just_pressed(KeyCode::Space) {
         let mut velocity = player.single_mut();
         velocity.0.y = IMPULSE;
+    }
+}
+
+#[derive(States, Default, Debug, Hash, Eq, PartialEq, Clone)]
+enum GameState {
+    #[default]
+    InProgress,
+    GameOver,
+}
+
+fn hit_ground(
+    mut player: Query<&Transform, With<Player>>,
+    windows: Query<&Window>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let transform = player.single_mut();
+    let window = windows.single();
+
+    if transform.translation.y < -window.height() / 2.0 + 64.0 {
+        next_state.set(GameState::GameOver);
     }
 }
