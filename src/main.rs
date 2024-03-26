@@ -5,25 +5,45 @@ use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingCircle, IntersectsVolume};
 use bevy::prelude::*;
 use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::time::common_conditions::on_real_timer;
+use bevy::time::Stopwatch;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, setup)
-        .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall).run_if(in_state(GameState::InProgress)))
+        .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, track_high_score).run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
         .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
         .add_systems(Update, restart_game.run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
         .init_state::<GameState>()
+        .insert_resource(Score::default())
+        .add_systems(OnEnter(GameState::GameOver), game_over)
+        .add_systems(OnEnter(GameState::InProgress), new_game)
         .run();
 }
 
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    score: Res<Score>,
 ) {
     commands.spawn(Camera2dBundle::default());
+
+    commands.spawn(
+        TextBundle {
+            text: Text::from_section(
+                format!("High Score: {}\nCurrent Score: {}", score.high, score.current),
+                TextStyle {
+                    color: Color::BLACK,
+                    font_size: 80.0,
+                    ..default()
+                }
+            ),
+            ..default()
+        }
+    );
+
     spawn_sprite(commands, asset_server);
 }
 
@@ -189,4 +209,38 @@ fn restart_game(
 
     spawn_sprite(commands, asset_server);
     next_state.set(GameState::InProgress);
+}
+
+#[derive(Resource, Default)]
+struct Score {
+    high: u64,
+    current: u64,
+    stopwatch: Stopwatch,
+}
+
+fn track_high_score(
+    mut score: ResMut<Score>,
+    time: Res<Time>,
+    mut text: Query<&mut Text>,
+) {
+    score.stopwatch.tick(time.delta());
+    score.current = score.stopwatch.elapsed().as_secs();
+    score.high = score.current.max(score.high);
+
+    let mut text = text.single_mut();
+    text.sections[0].value = format!("High Score: {}\nCurrent Score: {}", score.high, score.current);
+}
+
+fn game_over(
+    mut time: ResMut<Time<Virtual>>,
+) {
+    time.pause();
+}
+
+fn new_game(
+    mut time: ResMut<Time<Virtual>>,
+    mut score: ResMut<Score>,
+) {
+    score.stopwatch.reset();
+    time.unpause();
 }
