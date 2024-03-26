@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use bevy::input::common_conditions::input_just_pressed;
+use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingCircle, IntersectsVolume};
 use bevy::prelude::*;
 use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::time::common_conditions::on_real_timer;
@@ -10,7 +11,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, setup)
-        .add_systems(Update, (gravity, hit_ground, move_walls).run_if(in_state(GameState::InProgress)))
+        .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
         .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
         .init_state::<GameState>()
@@ -29,11 +30,13 @@ fn spawn_sprite(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
+    let translation = Vec3::new(-400.0, 0.0, 0.0);
+
     commands.spawn((
         SpriteBundle {
             texture: asset_server.load("bevy.png"), // 256x256
             transform: Transform {
-                translation: Vec3::new(-400.0, 0.0, 0.0),
+                translation,
                 scale: Vec3::new(0.5, 0.5, 1.0), // 50% scale == 128x128
                 ..default()
             },
@@ -41,7 +44,7 @@ fn spawn_sprite(
         },
         Mass,
         Velocity::default(),
-        Player,
+        Player { bounding_circle: Circle::new(64.).bounding_circle(translation.truncate(), 0.0) },
     ));
 }
 
@@ -63,7 +66,9 @@ fn gravity(
 }
 
 #[derive(Component)]
-struct Player;
+struct Player {
+    bounding_circle: BoundingCircle,
+}
 
 const IMPULSE: f32 = 2.0;
 
@@ -97,6 +102,7 @@ fn hit_ground(
 #[derive(Component)]
 struct Wall {
     rectangle: Rectangle,
+    bounding_box: Aabb2d,
 }
 
 const WALL_WIDTH: f32 = 100.0;
@@ -126,6 +132,7 @@ fn spawn_wall(
             },
             Wall {
                 rectangle,
+                bounding_box: rectangle.aabb_2d(transform.translation.truncate(), 0.0),
             }
         ));
     }
@@ -140,9 +147,31 @@ fn spawn_wall(
 const WALL_SPEED: f32 = -2.0;
 
 fn move_walls(
-    mut walls: Query<&mut Transform, With<Wall>>,
+    mut walls: Query<(&mut Transform, &mut Wall)>,
 ) {
-    for mut transform in walls.iter_mut() {
+    for (mut transform, mut wall) in walls.iter_mut() {
         transform.translation.x += WALL_SPEED;
+        wall.bounding_box = wall.rectangle.aabb_2d(transform.translation.truncate(), 0.0);
+    }
+}
+
+fn update_bounding_circle(
+    mut player: Query<(&Transform, &mut Player)>,
+) {
+    let (transform, mut player) = player.single_mut();
+    player.bounding_circle = Circle::new(64.).bounding_circle(transform.translation.truncate(), 0.0);
+}
+
+fn hit_wall(
+    player: Query<&Player>,
+    mut next_state: ResMut<NextState<GameState>>,
+    walls: Query<&Wall>,
+) {
+    let player = player.single();
+
+    for wall in walls.iter() {
+        if player.bounding_circle.intersects(&wall.bounding_box) {
+            next_state.set(GameState::GameOver);
+        }
     }
 }
