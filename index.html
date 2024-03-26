@@ -1,0 +1,27 @@
+<html lang="en">
+<head>
+    <title>Flappy Bevy</title>
+    <style>
+        * {
+            outline: 0;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+<canvas id="html-canvas-id"></canvas>
+<script type="module">
+    import init from './target/flappy-bevy.js'
+
+    init().catch((error) => {
+        if (!error.message.startsWith("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
+            throw error;
+        }
+    });
+</script>
+</body>
+</html>
