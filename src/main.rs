@@ -1,13 +1,18 @@
+use std::time::Duration;
+
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::prelude::*;
+use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
+use bevy::time::common_conditions::on_real_timer;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, setup)
-        .add_systems(Update, (gravity, hit_ground).run_if(in_state(GameState::InProgress)))
+        .add_systems(Update, (gravity, hit_ground, move_walls).run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
+        .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
         .init_state::<GameState>()
         .run();
 }
@@ -86,5 +91,58 @@ fn hit_ground(
 
     if transform.translation.y < -window.height() / 2.0 + 64.0 {
         next_state.set(GameState::GameOver);
+    }
+}
+
+#[derive(Component)]
+struct Wall {
+    rectangle: Rectangle,
+}
+
+const WALL_WIDTH: f32 = 100.0;
+const WALL_HEIGHT: f32 = 1000.0;
+const HOLE_SIZE: f32 = 300.0;
+const WALL_SPAWN_X: f32 = 800.0;
+
+fn spawn_wall(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    fn wall(
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<ColorMaterial>,
+        transform: Transform,
+    ) {
+        let rectangle = Rectangle::new(WALL_WIDTH, WALL_HEIGHT);
+
+        commands.spawn((
+            MaterialMesh2dBundle {
+                mesh: Mesh2dHandle(meshes.add(rectangle)),
+                material: materials.add(Color::RED),
+                transform,
+                ..default()
+            },
+            Wall {
+                rectangle,
+            }
+        ));
+    }
+
+    let top_wall = Transform::from_xyz(WALL_SPAWN_X, WALL_HEIGHT-500.0 + HOLE_SIZE / 2.0, 0.0);
+    wall(&mut commands, &mut meshes, &mut materials, top_wall);
+
+    let bottom_wall = Transform::from_xyz(WALL_SPAWN_X, -500.0 - HOLE_SIZE / 2.0, 0.0);
+    wall(&mut commands, &mut meshes, &mut materials, bottom_wall);
+}
+
+const WALL_SPEED: f32 = -2.0;
+
+fn move_walls(
+    mut walls: Query<&mut Transform, With<Wall>>,
+) {
+    for mut transform in walls.iter_mut() {
+        transform.translation.x += WALL_SPEED;
     }
 }
