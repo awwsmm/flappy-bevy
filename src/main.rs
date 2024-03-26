@@ -14,6 +14,7 @@ fn main() {
         .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
         .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
+        .add_systems(Update, restart_game.run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
         .init_state::<GameState>()
         .run();
 }
@@ -174,4 +175,18 @@ fn hit_wall(
             next_state.set(GameState::GameOver);
         }
     }
+}
+
+fn restart_game(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    query: Query<Entity, Or<(With<Wall>, With<Player>)>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    for e in &query {
+        commands.entity(e).despawn_recursive();
+    }
+
+    spawn_sprite(commands, asset_server);
+    next_state.set(GameState::InProgress);
 }
