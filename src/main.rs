@@ -94,10 +94,12 @@ struct Player {
 const IMPULSE: f32 = 2.0;
 
 fn flap(
-    mut player: Query<&mut Velocity, With<Player>>,
+    mut player: Query<(&mut Velocity, &Transform), With<Player>>,
 ) {
-    let mut velocity = player.single_mut();
-    velocity.0.y = IMPULSE;
+    let (mut velocity, position) = player.single_mut();
+    if position.translation.y < 300.0 {
+        velocity.0.y = IMPULSE;
+    }
 }
 
 #[derive(States, Default, Debug, Hash, Eq, PartialEq, Clone)]
