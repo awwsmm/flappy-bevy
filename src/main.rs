@@ -11,11 +11,11 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, spawn_sprite).chain())
         .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, track_high_score).run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
         .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
-        .add_systems(Update, restart_game.run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
+        .add_systems(Update, (restart_game, spawn_sprite).chain().run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
         .init_state::<GameState>()
         .insert_resource(Score::default())
         .add_systems(OnEnter(GameState::GameOver), game_over)
@@ -25,7 +25,6 @@ fn main() {
 
 fn setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     score: Res<Score>,
 ) {
     commands.spawn(Camera2dBundle::default());
@@ -43,22 +42,22 @@ fn setup(
             ..default()
         }
     );
-
-    spawn_sprite(commands, asset_server);
 }
 
 fn spawn_sprite(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    windows: Query<&Window>,
 ) {
-    let translation = Vec3::new(-400.0, 0.0, 0.0);
+    let window = windows.single();
+    let translation = Vec3::new(-window.width() / 2.0 * 0.7, 0.0, 0.0);
 
     commands.spawn((
         SpriteBundle {
             texture: asset_server.load("bevy.png"), // 256x256
             transform: Transform {
                 translation,
-                scale: Vec3::new(0.5, 0.5, 1.0), // 50% scale == 128x128
+                scale: Vec3::new(0.5, 0.5, 1.0), // 50% scale == 128x128  (64px radius)
                 ..default()
             },
             ..default()
@@ -95,9 +94,11 @@ const IMPULSE: f32 = 2.0;
 
 fn flap(
     mut player: Query<(&mut Velocity, &Transform), With<Player>>,
+    windows: Query<&Window>,
 ) {
     let (mut velocity, position) = player.single_mut();
-    if position.translation.y < 300.0 {
+    let window = windows.single();
+    if position.translation.y < window.height() / 2.0 {
         velocity.0.y = IMPULSE;
     }
 }
@@ -110,14 +111,14 @@ enum GameState {
 }
 
 fn hit_ground(
-    mut player: Query<&Transform, With<Player>>,
+    mut player: Query<(&Transform, &Player)>,
     windows: Query<&Window>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let transform = player.single_mut();
+    let (transform, player) = player.single_mut();
     let window = windows.single();
 
-    if transform.translation.y < -window.height() / 2.0 + 64.0 {
+    if transform.translation.y < -window.height() / 2.0 + player.bounding_circle.circle.radius {
         next_state.set(GameState::GameOver);
     }
 }
@@ -129,22 +130,30 @@ struct Wall {
 }
 
 const WALL_WIDTH: f32 = 100.0;
-const WALL_HEIGHT: f32 = 1000.0;
-const HOLE_SIZE: f32 = 300.0;
-const WALL_SPAWN_X: f32 = 800.0;
 
 fn spawn_wall(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    windows: Query<&Window>,
+    player: Query<&Player>
 ) {
+    let window = windows.single();
+    let player = player.single();
+
+    let wall_height = window.height();
+    let wall_spawn_x = window.width() / 2.0 + WALL_WIDTH;
+    let minimum_hole_size = player.bounding_circle.radius() * 2.0;
+    let hole_size = minimum_hole_size * 2.0;
+
     fn wall(
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<ColorMaterial>,
         transform: Transform,
+        wall_height: f32,
     ) {
-        let rectangle = Rectangle::new(WALL_WIDTH, WALL_HEIGHT);
+        let rectangle = Rectangle::new(WALL_WIDTH, wall_height);
 
         commands.spawn((
             MaterialMesh2dBundle {
@@ -160,11 +169,11 @@ fn spawn_wall(
         ));
     }
 
-    let top_wall = Transform::from_xyz(WALL_SPAWN_X, WALL_HEIGHT-500.0 + HOLE_SIZE / 2.0, 0.0);
-    wall(&mut commands, &mut meshes, &mut materials, top_wall);
+    let top_wall = Transform::from_xyz(wall_spawn_x, (wall_height + hole_size) / 2.0, 0.0);
+    wall(&mut commands, &mut meshes, &mut materials, top_wall, wall_height);
 
-    let bottom_wall = Transform::from_xyz(WALL_SPAWN_X, -500.0 - HOLE_SIZE / 2.0, 0.0);
-    wall(&mut commands, &mut meshes, &mut materials, bottom_wall);
+    let bottom_wall = Transform::from_xyz(wall_spawn_x,  -(wall_height + hole_size) / 2.0, 0.0);
+    wall(&mut commands, &mut meshes, &mut materials, bottom_wall, wall_height);
 }
 
 const WALL_SPEED: f32 = -2.0;
@@ -182,7 +191,7 @@ fn update_bounding_circle(
     mut player: Query<(&Transform, &mut Player)>,
 ) {
     let (transform, mut player) = player.single_mut();
-    player.bounding_circle = Circle::new(64.).bounding_circle(transform.translation.truncate(), 0.0);
+    player.bounding_circle.center = transform.translation.truncate();
 }
 
 fn hit_wall(
@@ -201,7 +210,6 @@ fn hit_wall(
 
 fn restart_game(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     query: Query<Entity, Or<(With<Wall>, With<Player>)>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
@@ -209,7 +217,6 @@ fn restart_game(
         commands.entity(e).despawn_recursive();
     }
 
-    spawn_sprite(commands, asset_server);
     next_state.set(GameState::InProgress);
 }
 
