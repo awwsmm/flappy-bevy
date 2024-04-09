@@ -18,9 +18,9 @@ fn main() {
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
         .add_systems(Update, (restart_game, reset_sprite).chain().run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
         .add_event::<Despawn>()
-        .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall).run_if(in_state(GameState::InProgress)))
+        .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
-        .add_systems(FixedUpdate, despawn.run_if(on_event::<Despawn>()))
+        .add_systems(FixedPostUpdate, despawn.run_if(on_event::<Despawn>()))
         .init_state::<GameState>()
         .insert_resource(Score::default())
         .add_systems(OnEnter(GameState::GameOver), game_over)
@@ -255,6 +255,19 @@ fn restart_game(
     }
 
     next_state.set(GameState::InProgress);
+}
+
+fn cleared_wall(
+    entities: Query<(Entity, &Transform), With<Wall>>,
+    window: Query<&Window>,
+    mut writer: EventWriter<Despawn>,
+) {
+    let window = window.single();
+    for (entity, transform) in entities.iter() {
+        if transform.translation.x < -window.width() {
+            writer.send(Despawn(entity));
+        }
+    }
 }
 
 #[derive(Resource, Default)]
