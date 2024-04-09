@@ -11,11 +11,11 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
-        .add_systems(Startup, (setup, spawn_sprite).chain())
+        .add_systems(Startup, (setup, spawn_sprite, reset_sprite).chain())
         .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, track_high_score).run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
         .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
-        .add_systems(Update, (restart_game, spawn_sprite).chain().run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
+        .add_systems(Update, (restart_game, reset_sprite).chain().run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
         .init_state::<GameState>()
         .insert_resource(Score::default())
         .add_systems(OnEnter(GameState::GameOver), game_over)
@@ -47,16 +47,11 @@ fn setup(
 fn spawn_sprite(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    windows: Query<&Window>,
 ) {
-    let window = windows.single();
-    let translation = Vec3::new(-window.width() / 2.0 * 0.7, 0.0, 0.0);
-
     commands.spawn((
         SpriteBundle {
             texture: asset_server.load("bevy.png"), // 256x256
             transform: Transform {
-                translation,
                 scale: Vec3::new(0.5, 0.5, 1.0), // 50% scale == 128x128  (64px radius)
                 ..default()
             },
@@ -64,8 +59,22 @@ fn spawn_sprite(
         },
         Mass,
         Velocity::default(),
-        Player { bounding_circle: Circle::new(64.).bounding_circle(translation.truncate(), 0.0) },
+        Player::default(),
     ));
+}
+
+fn reset_sprite(
+    windows: Query<&Window>,
+    mut player: Query<(&mut Transform, &mut Velocity, &mut Player)>,
+) {
+    let window = windows.single();
+    let translation = Vec3::new(-window.width() / 2.0 * 0.7, 0.0, 0.0);
+
+    let (mut transform, mut velocity, mut player) = player.single_mut();
+
+    transform.translation = translation;
+    velocity.0 = Vec2::default();
+    player.bounding_circle = Circle::new(64.).bounding_circle(translation.truncate(), 0.0);
 }
 
 #[derive(Component)]
@@ -88,6 +97,17 @@ fn gravity(
 #[derive(Component)]
 struct Player {
     bounding_circle: BoundingCircle,
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Self {
+            bounding_circle: BoundingCircle {
+                center: Vec2::new(0.0, 0.0),
+                circle: Circle::new(0.0),
+            }
+        }
+    }
 }
 
 const IMPULSE: f32 = 2.0;
@@ -210,7 +230,7 @@ fn hit_wall(
 
 fn restart_game(
     mut commands: Commands,
-    query: Query<Entity, Or<(With<Wall>, With<Player>)>>,
+    query: Query<Entity, With<Wall>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     for e in &query {
