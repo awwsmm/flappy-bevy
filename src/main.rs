@@ -4,18 +4,23 @@ use bevy::input::common_conditions::input_just_pressed;
 use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingCircle, IntersectsVolume};
 use bevy::prelude::*;
 use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
-use bevy::time::common_conditions::on_real_timer;
+use bevy::time::common_conditions::on_timer;
 use bevy::time::Stopwatch;
+
+const WALL_INTERVAL: Duration = Duration::from_millis(1500);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, (setup, spawn_sprite, reset_sprite).chain())
-        .add_systems(Update, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, track_high_score).run_if(in_state(GameState::InProgress)))
+        .add_systems(Update, track_high_score.run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
-        .add_systems(Update, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_real_timer(Duration::from_millis(1500)))))
         .add_systems(Update, (restart_game, reset_sprite).chain().run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
+        .add_event::<Despawn>()
+        .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall).run_if(in_state(GameState::InProgress)))
+        .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
+        .add_systems(FixedUpdate, despawn.run_if(on_event::<Despawn>()))
         .init_state::<GameState>()
         .insert_resource(Score::default())
         .add_systems(OnEnter(GameState::GameOver), game_over)
@@ -83,7 +88,7 @@ struct Mass;
 #[derive(Component, Default)]
 struct Velocity(Vec2);
 
-const GRAVITY: f32 = -0.1;
+const GRAVITY: f32 = -0.2;
 
 fn gravity(
     mut query: Query<(&mut Velocity, &mut Transform), With<Mass>>,
@@ -110,7 +115,7 @@ impl Default for Player {
     }
 }
 
-const IMPULSE: f32 = 2.0;
+const IMPULSE: f32 = 4.0;
 
 fn flap(
     mut player: Query<(&mut Velocity, &Transform), With<Player>>,
@@ -196,7 +201,7 @@ fn spawn_wall(
     wall(&mut commands, &mut meshes, &mut materials, bottom_wall, wall_height);
 }
 
-const WALL_SPEED: f32 = -2.0;
+const WALL_SPEED: f32 = -4.0;
 
 fn move_walls(
     mut walls: Query<(&mut Transform, &mut Wall)>,
@@ -228,13 +233,25 @@ fn hit_wall(
     }
 }
 
-fn restart_game(
+#[derive(Event)]
+struct Despawn(Entity);
+
+fn despawn(
     mut commands: Commands,
+    mut reader: EventReader<Despawn>,
+) {
+    for despawn in reader.read() {
+        commands.entity(despawn.0).despawn_recursive();
+    }
+}
+
+fn restart_game(
     query: Query<Entity, With<Wall>>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut writer: EventWriter<Despawn>,
 ) {
     for e in &query {
-        commands.entity(e).despawn_recursive();
+        writer.send(Despawn(e));
     }
 
     next_state.set(GameState::InProgress);
