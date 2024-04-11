@@ -8,6 +8,7 @@ use bevy::time::common_conditions::on_timer;
 use bevy::time::Stopwatch;
 
 mod game_over;
+mod new_game;
 
 const WALL_INTERVAL: Duration = Duration::from_millis(1500);
 
@@ -15,19 +16,24 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(game_over::plugin)
+        .add_plugins(new_game::plugin)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, (setup, spawn_sprite, reset_sprite).chain())
-        .add_systems(Update, track_high_score.run_if(in_state(GameState::InProgress)))
-        .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
+        .add_systems(Update, track_high_score)
+        .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left))))
         .add_event::<Despawn>()
         .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
-        .add_systems(FixedPostUpdate, despawn.run_if(on_event::<Despawn>()))
+        .add_systems(Update, despawn.run_if(on_event::<Despawn>()))
         .init_state::<GameState>()
         .insert_resource(Score::default())
-        .add_systems(OnEnter(GameState::InProgress), new_game)
+        .add_systems(OnEnter(GameState::InProgress), (new_game, reset_score))
+        .add_systems(OnEnter(GameState::PreGame), (pause_time, reset_score))
         .run();
 }
+
+#[derive(Component)]
+struct Scores;
 
 fn setup(
     mut commands: Commands,
@@ -35,7 +41,7 @@ fn setup(
 ) {
     commands.spawn(Camera2dBundle::default());
 
-    commands.spawn(
+    commands.spawn((
         TextBundle {
             text: Text::from_section(
                 format!("High Score: {}\nCurrent Score: {}", score.high, score.current),
@@ -46,8 +52,9 @@ fn setup(
                 }
             ),
             ..default()
-        }
-    );
+        },
+        Scores
+    ));
 }
 
 fn spawn_sprite(
@@ -132,6 +139,7 @@ fn flap(
 #[derive(States, Default, Debug, Hash, Eq, PartialEq, Clone)]
 enum GameState {
     #[default]
+    PreGame,
     InProgress,
     GameOver,
 }
@@ -269,7 +277,7 @@ struct Score {
 fn track_high_score(
     mut score: ResMut<Score>,
     time: Res<Time>,
-    mut text: Query<&mut Text>,
+    mut text: Query<&mut Text, With<Scores>>,
 ) {
     score.stopwatch.tick(time.delta());
     score.current = score.stopwatch.elapsed().as_secs();
@@ -279,10 +287,14 @@ fn track_high_score(
     text.sections[0].value = format!("High Score: {}\nCurrent Score: {}", score.high, score.current);
 }
 
-fn new_game(
-    mut time: ResMut<Time<Virtual>>,
-    mut score: ResMut<Score>,
-) {
-    score.stopwatch.reset();
+fn pause_time(mut time: ResMut<Time<Virtual>>) {
+    time.pause();
+}
+
+fn new_game(mut time: ResMut<Time<Virtual>>) {
     time.unpause();
+}
+
+fn reset_score(mut score: ResMut<Score>) {
+    score.stopwatch.reset();
 }
