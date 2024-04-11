@@ -1,25 +1,16 @@
 use bevy::prelude::*;
 
-use crate::{Despawn, GameState, reset_sprite, Wall};
+use crate::{GameState, handle_button_event, pause_time};
 
 pub fn plugin(app: &mut App) {
     app
+        .add_systems(OnEnter(GameState::GameOver), (pause_time, game_over))
         .add_event::<Restart>()
+        .add_systems(Update, handle_button_event::<RestartButton, Restart, GameOverMenu>.run_if(in_state(GameState::GameOver)))
+        .add_systems(Update, restart_game.run_if(in_state(GameState::GameOver).and_then(on_event::<Restart>())))
         .add_event::<BackToMenu>()
-        .add_systems(OnEnter(GameState::GameOver), game_over)
-        .add_systems(Update, button_event::<RestartButton, Restart>.run_if(in_state(GameState::GameOver)))
-        .add_systems(Update, button_event::<BackToMenuButton, BackToMenu>.run_if(in_state(GameState::GameOver)))
-        .add_systems(Update, (despawn_all_walls, restart_game, reset_sprite).run_if(in_state(GameState::GameOver).and_then(on_event::<Restart>())))
-        .add_systems(Update, (despawn_all_walls, back_to_menu, reset_sprite).run_if(in_state(GameState::GameOver).and_then(on_event::<BackToMenu>())));
-}
-
-fn despawn_all_walls(
-    query: Query<Entity, With<Wall>>,
-    mut writer: EventWriter<Despawn>,
-) {
-    for e in &query {
-        writer.send(Despawn(e));
-    }
+        .add_systems(Update, handle_button_event::<BackToMenuButton, BackToMenu, GameOverMenu>.run_if(in_state(GameState::GameOver)))
+        .add_systems(Update, back_to_menu.run_if(in_state(GameState::GameOver).and_then(on_event::<BackToMenu>())));
 }
 
 fn restart_game(mut next_state: ResMut<NextState<GameState>>) {
@@ -186,26 +177,3 @@ struct Restart;
 
 #[derive(Event, Default)]
 struct BackToMenu;
-
-fn button_event<B: Component, E: Default + Event>(
-    mut button: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<B>)>,
-    mut writer: EventWriter<E>,
-    mut commands: Commands,
-    game_over_menu: Query<Entity, With<GameOverMenu>>,
-) {
-    for (interaction, mut color) in &mut button {
-        match *interaction {
-            Interaction::Pressed => {
-                *color = Color::rgba(0.0, 1.0, 0.0, 1.0).into();
-                writer.send(E::default());
-                commands.entity(game_over_menu.single()).despawn_recursive();
-            }
-            Interaction::Hovered => {
-                *color = Color::rgba(0.0, 1.0, 0.0, 0.75).into();
-            }
-            Interaction::None => {
-                *color = Color::rgba(0.0, 1.0, 0.0, 0.5).into();
-            }
-        }
-    }
-}
