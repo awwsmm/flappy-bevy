@@ -5,17 +5,23 @@ use bevy::math::bounding::{Bounded2d, IntersectsVolume};
 use bevy::prelude::*;
 use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::time::common_conditions::on_timer;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use crate::{Despawn, despawn_all_walls, GameState, Mass, Player, reset_score, reset_sprite, unpause_time, Velocity, Wall};
 
 const WALL_INTERVAL: Duration = Duration::from_millis(1500);
 
+const RANDOM_SEED: u64 = 42;
+
 pub fn plugin(app: &mut App) {
     app
-        .add_systems(OnEnter(GameState::InProgress), (unpause_time, reset_score, reset_sprite, despawn_all_walls))
+        .add_systems(OnEnter(GameState::InProgress), (unpause_time, reset_score, reset_sprite, despawn_all_walls, reset_hole_info, reset_rng))
         .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
-        .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left))));
+        .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left))))
+        .insert_resource(RNG(ChaCha8Rng::seed_from_u64(RANDOM_SEED)))
+        .insert_resource(PreviousHole::default());
 }
 
 const GRAVITY: f32 = -0.2;
@@ -29,7 +35,7 @@ fn gravity(
     }
 }
 
-const IMPULSE: f32 = 4.0;
+const IMPULSE: f32 = 6.0;
 
 fn flap(
     mut player: Query<(&mut Velocity, &Transform), With<Player>>,
@@ -51,20 +57,73 @@ fn update_bounding_circle(
     player.bounding_circle.center = transform.translation.truncate();
 }
 
+#[derive(Resource, Default)]
+struct PreviousHole {
+    height: f32,
+    index: u32,
+}
+
+fn reset_hole_info(
+    mut previous_hole: ResMut<PreviousHole>
+) {
+    let default = PreviousHole::default();
+    previous_hole.height = default.height;
+    previous_hole.index = default.index;
+}
+
+#[derive(Resource)]
+struct RNG(ChaCha8Rng);
+
+fn reset_rng(
+    mut rng: ResMut<RNG>,
+) {
+    rng.0 = ChaCha8Rng::seed_from_u64(RANDOM_SEED)
+}
+
+/// Walls are spawned with a hole size and a hole height `h`.
+///
+/// Holes have a randomly-generated size within [`min_hole_size`, `max_hole_size`].
+/// As time increases, `min_hole_size` and `max_hole_size` both decrease, to a minimum of 110% sprite diameter.
+///
+/// Holes have an `h` which is a distance `delta_h` from the previous hole, `h = h_prev +/- delta_h`.
+/// Holes have a randomly-generated `delta_h` within [0, `delta_h_max`].
+/// As time increases, `delta_h_max` increases, but `h` is always clamped to fall within the window.
 fn spawn_wall(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     windows: Query<&Window>,
-    player: Query<&Player>
+    player: Query<&Player>,
+    mut previous_hole: ResMut<PreviousHole>,
+    mut rng: ResMut<RNG>,
 ) {
     let window = windows.single();
-    let player = player.single();
+    let sprite_diameter = player.single().bounding_circle.radius() * 2.0;
+    let hole_index = previous_hole.index as f32;
 
-    let wall_height = window.height();
+    // minimum hole width starts at 3x diameter and decreases over time
+    // maximum hole width starts at 5x diameter and decreases over time
+    let min_hole_size = (sprite_diameter * 1.1) + (sprite_diameter * 1.9) / (1.0 + hole_index / 10.0);
+    let max_hole_size = (sprite_diameter * 1.1) + (sprite_diameter * 3.9) / (1.0 + hole_index / 10.0);
+
+    let half_hole_size = rng.0.gen_range(min_hole_size..=max_hole_size) / 2.0;
+
+    // maximum delta_h starts near 0 and increases toward window height over time
+    let delta_h_max = window.height() * hole_index / (10.0 + hole_index);
+    let delta_h = rng.0.gen_range(-delta_h_max..=delta_h_max);
+
+    // the hole should never extend beyond the window
+    let half_window_height = window.height() / 2.0;
+    let h_limit = half_window_height - half_hole_size - 20.0;
+    let h = (previous_hole.height + delta_h).clamp(-h_limit, h_limit);
+
+    info!("hole: {} -> {}", h - half_hole_size, h + half_hole_size);
+
+    previous_hole.height = h;
+    previous_hole.index += 1;
+
+    // let wall_height = window.height();
     let wall_spawn_x = window.width() / 2.0 + WALL_WIDTH;
-    let minimum_hole_size = player.bounding_circle.radius() * 2.0;
-    let hole_size = minimum_hole_size * 2.0;
 
     fn wall(
         commands: &mut Commands,
@@ -89,11 +148,11 @@ fn spawn_wall(
         ));
     }
 
-    let top_wall = Transform::from_xyz(wall_spawn_x, (wall_height + hole_size) / 2.0, 0.0);
-    wall(&mut commands, &mut meshes, &mut materials, top_wall, wall_height);
+    let top_wall = Transform::from_xyz(wall_spawn_x, half_window_height + half_hole_size + h, 0.0);
+    wall(&mut commands, &mut meshes, &mut materials, top_wall, half_window_height * 2.0);
 
-    let bottom_wall = Transform::from_xyz(wall_spawn_x,  -(wall_height + hole_size) / 2.0, 0.0);
-    wall(&mut commands, &mut meshes, &mut materials, bottom_wall, wall_height);
+    let bottom_wall = Transform::from_xyz(wall_spawn_x, -half_window_height - half_hole_size + h, 0.0);
+    wall(&mut commands, &mut meshes, &mut materials, bottom_wall, half_window_height * 2.0);
 }
 
 const WALL_SPEED: f32 = -4.0;
