@@ -7,23 +7,24 @@ use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::time::common_conditions::on_timer;
 use bevy::time::Stopwatch;
 
+mod game_over;
+
 const WALL_INTERVAL: Duration = Duration::from_millis(1500);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(game_over::plugin)
         .insert_resource(ClearColor(Color::WHITE))
         .add_systems(Startup, (setup, spawn_sprite, reset_sprite).chain())
         .add_systems(Update, track_high_score.run_if(in_state(GameState::InProgress)))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(KeyCode::Space))))
-        .add_systems(Update, (restart_game, reset_sprite).chain().run_if(in_state(GameState::GameOver).and_then(input_just_pressed(KeyCode::Escape))))
         .add_event::<Despawn>()
         .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
         .add_systems(FixedPostUpdate, despawn.run_if(on_event::<Despawn>()))
         .init_state::<GameState>()
         .insert_resource(Score::default())
-        .add_systems(OnEnter(GameState::GameOver), game_over)
         .add_systems(OnEnter(GameState::InProgress), new_game)
         .run();
 }
@@ -245,18 +246,6 @@ fn despawn(
     }
 }
 
-fn restart_game(
-    query: Query<Entity, With<Wall>>,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut writer: EventWriter<Despawn>,
-) {
-    for e in &query {
-        writer.send(Despawn(e));
-    }
-
-    next_state.set(GameState::InProgress);
-}
-
 fn cleared_wall(
     entities: Query<(Entity, &Transform), With<Wall>>,
     window: Query<&Window>,
@@ -288,12 +277,6 @@ fn track_high_score(
 
     let mut text = text.single_mut();
     text.sections[0].value = format!("High Score: {}\nCurrent Score: {}", score.high, score.current);
-}
-
-fn game_over(
-    mut time: ResMut<Time<Virtual>>,
-) {
-    time.pause();
 }
 
 fn new_game(
