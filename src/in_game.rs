@@ -112,7 +112,7 @@ fn spawn_wall(
     let min_hole_size = (sprite_diameter * 1.1) + (sprite_diameter * 1.9) / (1.0 + hole_index / 10.0);
     let max_hole_size = (sprite_diameter * 1.1) + (sprite_diameter * 3.9) / (1.0 + hole_index / 10.0);
 
-    let half_hole_size = rng.0.gen_range(min_hole_size..=max_hole_size) / 2.0;
+    let half_hole_size = rng.0.gen_range(min_hole_size..=max_hole_size.min(min_hole_size)) / 2.0;
 
     // maximum delta_h starts near 0 and increases toward window height over time
     let delta_h_max = window.height() * hole_index / (10.0 + hole_index);
@@ -120,7 +120,7 @@ fn spawn_wall(
 
     // the hole should never extend beyond the window
     let half_window_height = window.height() / 2.0;
-    let h_limit = half_window_height - half_hole_size - 20.0;
+    let h_limit = (half_window_height - half_hole_size - 20.0).max(0.0);
     let h = (previous_hole.height + delta_h).clamp(-h_limit, h_limit);
 
     debug!("hole: {} -> {}", h - half_hole_size, h + half_hole_size);

@@ -45,7 +45,9 @@ fn pre_game(mut commands: Commands) {
                 style: Style {
                     border: UiRect::all(Val::Px(3.0)),
                     width: Val::Percent(50.0),
+                    min_width: Val::Px(550.0),
                     height: Val::Percent(50.0),
+                    min_height: Val::Px(200.0),
                     flex_direction: FlexDirection::Column,
                     ..default()
                 },

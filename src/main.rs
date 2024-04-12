@@ -2,6 +2,7 @@ use bevy::asset::AssetMetaCheck;
 use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingCircle};
 use bevy::prelude::*;
 use bevy::time::Stopwatch;
+use bevy::window::WindowResized;
 use bevy_pkv::PkvStore;
 
 mod game_over;
@@ -19,6 +20,11 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 canvas: Some("#html-canvas-id".into()),
+                resize_constraints: WindowResizeConstraints {
+                    min_width: 800.0,
+                    min_height: 600.0,
+                    ..default()
+                },
                 ..default()
             }),
             ..default()
@@ -28,6 +34,7 @@ fn main() {
         .init_state::<GameState>()
         .add_plugins((game_over::plugin, new_game::plugin, in_game::plugin))
         .add_systems(Startup, (setup, spawn_sprite, reset_sprite, load_high_score).chain())
+        .add_systems(Update, lock_sprite_x_position.run_if(on_event::<WindowResized>()))
         .add_event::<Despawn>()
         .add_systems(Update, despawn.run_if(on_event::<Despawn>()))
         .insert_resource(PkvStore::new("awwsmm", "flappy-bevy"))
@@ -105,12 +112,27 @@ fn reset_sprite(
     mut player: Query<(&mut Transform, &mut Velocity, &mut Player)>,
 ) {
     let window = windows.single();
-    let translation = Vec3::new(-window.width() / 2.0 * 0.7, 0.0, 0.0);
-
     let (mut transform, mut velocity, mut player) = player.single_mut();
+
+    let translation = Vec3::new(-window.width() / 2.0 + 2.0 * player.bounding_circle.circle.radius, 0.0, 0.0);
 
     transform.translation = translation;
     velocity.0 = Vec2::default();
+    player.bounding_circle = Circle::new(64.).bounding_circle(translation.truncate(), 0.0);
+}
+
+fn lock_sprite_x_position(
+    windows: Query<&Window>,
+    mut player: Query<(&mut Transform, &mut Player)>,
+) {
+    let window = windows.single();
+    let (mut transform, mut player) = player.single_mut();
+
+    let x = -window.width() / 2.0 + 2.0 * player.bounding_circle.circle.radius;
+    let y = player.bounding_circle.center.y;
+    let translation = Vec3::new(x, y, 0.0);
+
+    transform.translation = translation;
     player.bounding_circle = Circle::new(64.).bounding_circle(translation.truncate(), 0.0);
 }
 
