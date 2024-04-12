@@ -1,22 +1,36 @@
+use bevy::asset::AssetMetaCheck;
 use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingCircle};
 use bevy::prelude::*;
 use bevy::time::Stopwatch;
+use bevy_pkv::PkvStore;
 
 mod game_over;
 mod new_game;
 mod in_game;
 
+// PkvStore is at
+//   (macOS desktop) ~/Library/Application\ Support/awwsmm.flappy-bevy/bevy_pkv.redb
+//   (macOS Chrome)  ~/Library/Application\ Support/Google/Chrome/Default/Local\ Storage/leveldb/
+//       clear local storage in Developer Tools > Application > Local Storage
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .insert_resource(AssetMetaCheck::Never) // https://github.com/bevyengine/bevy/issues/10157#issuecomment-1849092112
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                canvas: Some("#html-canvas-id".into()),
+                ..default()
+            }),
+            ..default()
+        }))
         .insert_resource(ClearColor(Color::WHITE))
         .insert_resource(Score::default())
         .init_state::<GameState>()
         .add_plugins((game_over::plugin, new_game::plugin, in_game::plugin))
-        .add_systems(Startup, (setup, spawn_sprite, reset_sprite).chain())
-        .add_systems(Update, track_high_score)
+        .add_systems(Startup, (setup, spawn_sprite, reset_sprite, load_high_score).chain())
         .add_event::<Despawn>()
         .add_systems(Update, despawn.run_if(on_event::<Despawn>()))
+        .insert_resource(PkvStore::new("awwsmm", "flappy-bevy"))
         .run();
 }
 
@@ -31,6 +45,19 @@ fn despawn_all_walls(
 
 #[derive(Component)]
 struct Scores;
+
+fn load_high_score(
+    mut score: ResMut<Score>,
+    mut pkv: ResMut<PkvStore>,
+) {
+    if let Ok(high_score) = pkv.get::<u64>("high score") {
+        score.high = high_score;
+
+    } else {
+        pkv.set::<u64>("high score", &0)
+            .expect("failed to store high score");
+    }
+}
 
 fn setup(
     mut commands: Commands,
@@ -140,19 +167,6 @@ struct Score {
     high: u64,
     current: u64,
     stopwatch: Stopwatch,
-}
-
-fn track_high_score(
-    mut score: ResMut<Score>,
-    time: Res<Time>,
-    mut text: Query<&mut Text, With<Scores>>,
-) {
-    score.stopwatch.tick(time.delta());
-    score.current = score.stopwatch.elapsed().as_secs();
-    score.high = score.current.max(score.high);
-
-    let mut text = text.single_mut();
-    text.sections[0].value = format!("High Score: {}\nCurrent Score: {}", score.high, score.current);
 }
 
 fn pause_time(mut time: ResMut<Time<Virtual>>) {

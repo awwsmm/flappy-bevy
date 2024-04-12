@@ -5,10 +5,11 @@ use bevy::math::bounding::{Bounded2d, IntersectsVolume};
 use bevy::prelude::*;
 use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::time::common_conditions::on_timer;
+use bevy_pkv::PkvStore;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::{Despawn, despawn_all_walls, GameState, Mass, Player, reset_score, reset_sprite, unpause_time, Velocity, Wall};
+use crate::{Despawn, despawn_all_walls, GameState, Mass, Player, reset_score, reset_sprite, Score, Scores, unpause_time, Velocity, Wall};
 
 const WALL_INTERVAL: Duration = Duration::from_millis(1500);
 
@@ -17,11 +18,16 @@ const RANDOM_SEED: u64 = 42;
 pub fn plugin(app: &mut App) {
     app
         .add_systems(OnEnter(GameState::InProgress), (unpause_time, reset_score, reset_sprite, despawn_all_walls, reset_hole_info, reset_rng))
+        .add_systems(Update, track_high_score.run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
-        .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left))))
+        .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left).or_else(just_touched()))))
         .insert_resource(RNG(ChaCha8Rng::seed_from_u64(RANDOM_SEED)))
         .insert_resource(PreviousHole::default());
+}
+
+pub fn just_touched() -> impl FnMut(Res<Touches>) -> bool {
+    move |touch_input: Res<Touches>| touch_input.any_just_pressed()
 }
 
 const GRAVITY: f32 = -0.2;
@@ -117,7 +123,7 @@ fn spawn_wall(
     let h_limit = half_window_height - half_hole_size - 20.0;
     let h = (previous_hole.height + delta_h).clamp(-h_limit, h_limit);
 
-    info!("hole: {} -> {}", h - half_hole_size, h + half_hole_size);
+    debug!("hole: {} -> {}", h - half_hole_size, h + half_hole_size);
 
     previous_hole.height = h;
     previous_hole.index += 1;
@@ -204,4 +210,20 @@ fn hit_wall(
             next_state.set(GameState::GameOver);
         }
     }
+}
+
+fn track_high_score(
+    mut score: ResMut<Score>,
+    time: Res<Time>,
+    mut text: Query<&mut Text, With<Scores>>,
+    mut pkv: ResMut<PkvStore>,
+) {
+    score.stopwatch.tick(time.delta());
+    score.current = score.stopwatch.elapsed().as_secs();
+    score.high = score.current.max(score.high);
+
+    let mut text = text.single_mut();
+    text.sections[0].value = format!("High Score: {}\nCurrent Score: {}", score.high, score.current);
+
+    pkv.set("high score", &score.high).unwrap()
 }
