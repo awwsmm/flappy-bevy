@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::asset::AssetMetaCheck;
 use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingCircle};
 use bevy::prelude::*;
@@ -17,18 +19,21 @@ mod in_game;
 fn main() {
     App::new()
         .insert_resource(AssetMetaCheck::Never) // https://github.com/bevyengine/bevy/issues/10157#issuecomment-1849092112
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                canvas: Some("#html-canvas-id".into()),
-                resize_constraints: WindowResizeConstraints {
-                    min_width: 800.0,
-                    min_height: 600.0,
+        .add_plugins(DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    canvas: Some("#html-canvas-id".into()),
+                    resize_constraints: WindowResizeConstraints {
+                        min_width: 800.0,
+                        min_height: 600.0,
+                        ..default()
+                    },
                     ..default()
-                },
+                }),
                 ..default()
-            }),
-            ..default()
-        }))
+            })
+            .set(ImagePlugin::default_nearest())
+        )
         .insert_resource(ClearColor(Color::WHITE))
         .insert_resource(Score::default())
         .init_state::<GameState>()
@@ -88,22 +93,56 @@ fn setup(
     ));
 }
 
+#[derive(Component)]
+struct AnimationConfig {
+    first_sprite_index: usize,
+    last_sprite_index: usize,
+    current_sprite_index: usize,
+    fps: u8,
+    frame_timer: Timer,
+}
+
+impl AnimationConfig {
+    fn new(first: usize, last: usize, fps: u8) -> Self {
+        Self {
+            first_sprite_index: first,
+            last_sprite_index: last,
+            current_sprite_index: first,
+            fps,
+            frame_timer: Self::timer_from_fps(fps),
+        }
+    }
+
+    fn timer_from_fps(fps: u8) -> Timer {
+        Timer::new(Duration::from_secs_f32(1.0 / (fps as f32)), TimerMode::Once)
+    }
+}
+
 fn spawn_sprite(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
+    let texture = asset_server.load("bird.png");
+    let layout = TextureAtlasLayout::from_grid(Vec2::new(64.0, 64.0), 4, 1, None, None);
+    let texture_atlas_layout = texture_atlas_layouts.add(layout);
+
+    let animation_config = AnimationConfig::new(0, 3, 24);
+
     commands.spawn((
-        SpriteBundle {
-            texture: asset_server.load("bevy.png"), // 256x256
-            transform: Transform {
-                scale: Vec3::new(0.5, 0.5, 1.0), // 50% scale == 128x128  (64px radius)
-                ..default()
+        SpriteSheetBundle {
+            texture,
+            atlas: TextureAtlas {
+                layout: texture_atlas_layout,
+                index: 0,
             },
+            transform: Transform::from_scale(Vec3::splat(3.0)),
             ..default()
         },
         Mass,
         Velocity::default(),
         Player::default(),
+        animation_config
     ));
 }
 

@@ -9,7 +9,7 @@ use bevy_pkv::PkvStore;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::{Despawn, despawn_all_walls, GameState, Mass, Player, reset_score, reset_sprite, Score, Scores, unpause_time, Velocity, Wall};
+use crate::{AnimationConfig, Despawn, despawn_all_walls, GameState, Mass, Player, reset_score, reset_sprite, Score, Scores, unpause_time, Velocity, Wall};
 
 const WALL_INTERVAL: Duration = Duration::from_millis(1500);
 
@@ -18,7 +18,7 @@ const RANDOM_SEED: u64 = 42;
 pub fn plugin(app: &mut App) {
     app
         .add_systems(OnEnter(GameState::InProgress), (unpause_time, reset_score, reset_sprite, despawn_all_walls, reset_hole_info, reset_rng))
-        .add_systems(Update, track_high_score.run_if(in_state(GameState::InProgress)))
+        .add_systems(Update, (track_high_score, execute_animations).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left).or_else(just_touched()))))
@@ -44,14 +44,16 @@ fn gravity(
 const IMPULSE: f32 = 6.0;
 
 fn flap(
-    mut player: Query<(&mut Velocity, &Transform), With<Player>>,
+    mut player: Query<(&mut Velocity, &Transform, &mut AnimationConfig), With<Player>>,
     windows: Query<&Window>,
 ) {
-    let (mut velocity, position) = player.single_mut();
+    let (mut velocity, position, mut animation) = player.single_mut();
     let window = windows.single();
     if position.translation.y < window.height() / 2.0 {
         velocity.0.y = IMPULSE;
     }
+    animation.frame_timer = AnimationConfig::timer_from_fps(animation.fps);
+    animation.current_sprite_index = animation.first_sprite_index;
 }
 
 const WALL_WIDTH: f32 = 100.0;
@@ -226,4 +228,23 @@ fn track_high_score(
     text.sections[0].value = format!("High Score: {}\nCurrent Score: {}", score.high, score.current);
 
     pkv.set("high score", &score.high).unwrap()
+}
+
+fn execute_animations(
+    time: Res<Time>,
+    mut query: Query<(&mut AnimationConfig, &mut TextureAtlas)>,
+) {
+    for (mut config, mut atlas) in &mut query {
+        config.frame_timer.tick(time.delta());
+        if config.frame_timer.just_finished() {
+            if config.current_sprite_index == config.last_sprite_index {
+                atlas.index = config.first_sprite_index;
+                config.current_sprite_index = config.first_sprite_index;
+            } else {
+                config.current_sprite_index += 1;
+                atlas.index = config.current_sprite_index;
+                config.frame_timer = AnimationConfig::timer_from_fps(config.fps);
+            }
+        }
+    }
 }
