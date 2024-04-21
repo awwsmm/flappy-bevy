@@ -209,6 +209,7 @@ enum GameState {
 #[derive(Component)]
 struct Wall {
     rectangle: Rectangle,
+    center: Vec2,
     bounding_box: Aabb2d,
 }
 

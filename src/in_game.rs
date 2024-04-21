@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use bevy::input::common_conditions::input_just_pressed;
-use bevy::math::bounding::{Bounded2d, IntersectsVolume};
+use bevy::math::bounding::{Aabb2d, Bounded2d, IntersectsVolume};
 use bevy::prelude::*;
-use bevy::sprite::{MaterialMesh2dBundle, Mesh2dHandle};
 use bevy::time::common_conditions::on_timer;
 use bevy_pkv::PkvStore;
 use rand::{Rng, SeedableRng};
@@ -22,6 +21,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left).or_else(just_touched()))))
+        // .add_systems(PostUpdate, debug_bounds)
         .insert_resource(RNG(ChaCha8Rng::seed_from_u64(RANDOM_SEED)))
         .insert_resource(PreviousHole::default());
 }
@@ -65,6 +65,23 @@ fn update_bounding_circle(
     player.bounding_circle.center = transform.translation.truncate();
 }
 
+// fn debug_bounds(
+//     mut gizmos: Gizmos,
+//     players: Query<&Player>,
+//     walls: Query<&Wall>,
+// ) {
+//     let player = players.single();
+//     gizmos.circle_2d(player.bounding_circle.center, player.bounding_circle.circle.radius, Color::RED);
+//
+//     for wall in walls.iter() {
+//         let bottom_left = wall.bounding_box.min;
+//         let top_right = wall.bounding_box.max;
+//         let dimensions = top_right - bottom_left;
+//         let center = (bottom_left + top_right) / 2.0;
+//         gizmos.rect_2d(center, 0.0, dimensions, Color::RED);
+//     }
+// }
+
 #[derive(Resource, Default)]
 struct PreviousHole {
     height: f32,
@@ -88,6 +105,8 @@ fn reset_rng(
     rng.0 = ChaCha8Rng::seed_from_u64(RANDOM_SEED)
 }
 
+const SPRITE_SIZE: f32 = 128.0; // px
+
 /// Walls are spawned with a hole size and a hole height `h`.
 ///
 /// Holes have a randomly-generated size within [`min_hole_size`, `max_hole_size`].
@@ -98,21 +117,151 @@ fn reset_rng(
 /// As time increases, `delta_h_max` increases, but `h` is always clamped to fall within the window.
 fn spawn_wall(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     windows: Query<&Window>,
     player: Query<&Player>,
     mut previous_hole: ResMut<PreviousHole>,
     mut rng: ResMut<RNG>,
 ) {
+    let texture = asset_server.load("wall.png");
+    let layout = TextureAtlasLayout::from_grid(Vec2::new(128.0, 128.0), 6, 1, None, None);
+    let texture_atlas_layout = texture_atlas_layouts.add(layout);
+
+    // (x, y) position is at the center of the rectangle
+    // x increases to the right, y increases to the top
+    //
+    //   +------------------------------------+
+    //   |                     (x2, y2)       |
+    //   |    (x1, y1)             |          |
+    //   |        |           +----|----+     |
+    //   |   +----|----+      |    v    |     |
+    //   |   |    v    |      |    x    |     |
+    //   |   |    x    |      |         |     |
+    //   |   |         |      +---------+     |
+    //   |   +---------+                      |
+    //   |                  x1 < x2, y1 < y2  |
+    //   +------------------------------------+
+
+    fn spawn_bottom_wall(
+        commands: &mut Commands,
+        top_left_corner: Vec2,
+        texture: Handle<Image>,
+        texture_atlas_layout: Handle<TextureAtlasLayout>,
+        half_window_height: f32
+    ) {
+        let wall_height = half_window_height + top_left_corner.y;
+
+        commands.spawn((
+            SpatialBundle {
+                transform: Transform {
+                    translation: (top_left_corner + Vec2::new(WALL_WIDTH / 2.0, -SPRITE_SIZE / 2.0)).extend(0.0),
+                    ..default()
+                },
+                ..default()
+            },
+            Wall {
+                rectangle: Rectangle::new(WALL_WIDTH, wall_height),
+                center: top_left_corner + Vec2::new(WALL_WIDTH / 2.0, -wall_height / 2.0),
+                bounding_box: Aabb2d::new(Vec2::ZERO, Vec2::ZERO),
+            }
+        )).with_children(|parent| {
+            parent.spawn(
+                SpriteSheetBundle {
+                    texture: texture.clone(),
+                    atlas: TextureAtlas {
+                        layout: texture_atlas_layout.clone(),
+                        index: 5,
+                    },
+                    ..default()
+                }
+            );
+
+            let mut bottom_of_wall = top_left_corner.y - SPRITE_SIZE;
+
+            while bottom_of_wall > -half_window_height {
+                parent.spawn(
+                    SpriteSheetBundle {
+                        texture: texture.clone(),
+                        atlas: TextureAtlas {
+                            layout: texture_atlas_layout.clone(),
+                            index: 3,
+                        },
+                        transform: Transform::from_translation(Vec3::Y * (bottom_of_wall - top_left_corner.y)),
+                        ..default()
+                    }
+                );
+
+                bottom_of_wall -= SPRITE_SIZE;
+            }
+        });
+    }
+
+    fn spawn_top_wall(
+        commands: &mut Commands,
+        bottom_left_corner: Vec2,
+        texture: Handle<Image>,
+        texture_atlas_layout: Handle<TextureAtlasLayout>,
+        half_window_height: f32
+    ) {
+        let wall_height = half_window_height - bottom_left_corner.y;
+
+        commands.spawn((
+            SpatialBundle {
+                transform: Transform {
+                    translation: (bottom_left_corner + Vec2::splat(SPRITE_SIZE / 2.0)).extend(0.0),
+                    ..default()
+                },
+                ..default()
+            },
+            Wall {
+                rectangle: Rectangle::new(WALL_WIDTH, wall_height),
+                center: bottom_left_corner + Vec2::new(WALL_WIDTH / 2.0, wall_height / 2.0),
+                bounding_box: Aabb2d::new(Vec2::ZERO, Vec2::ZERO),
+            }
+        )).with_children(|parent| {
+            parent.spawn(
+                SpriteSheetBundle {
+                    texture: texture.clone(),
+                    atlas: TextureAtlas {
+                        layout: texture_atlas_layout.clone(),
+                        index: 4,
+                    },
+                    ..default()
+                }
+            );
+
+            let mut top_of_wall = bottom_left_corner.y + SPRITE_SIZE;
+
+            while top_of_wall < half_window_height {
+                parent.spawn(
+                    SpriteSheetBundle {
+                        texture: texture.clone(),
+                        atlas: TextureAtlas {
+                            layout: texture_atlas_layout.clone(),
+                            index: 3,
+                        },
+                        transform: Transform::from_translation(Vec3::Y * (top_of_wall - bottom_left_corner.y)),
+                        ..default()
+                    }
+                );
+
+                top_of_wall += SPRITE_SIZE;
+            }
+        });
+    }
+
     let window = windows.single();
-    let sprite_diameter = player.single().bounding_circle.radius() * 2.0;
+    let half_window_height = window.height() / 2.0;
+    let half_window_width = window.width() / 2.0;
+
+    let sprite_height = player.single().bounding_circle.radius() * 2.0;
     let hole_index = previous_hole.index as f32;
 
-    // minimum hole width starts at 3x diameter and decreases over time
-    // maximum hole width starts at 5x diameter and decreases over time
-    let min_hole_size = (sprite_diameter * 1.1) + (sprite_diameter * 1.9) / (1.0 + hole_index / 10.0);
-    let max_hole_size = (sprite_diameter * 1.1) + (sprite_diameter * 3.9) / (1.0 + hole_index / 10.0);
+    // minimum hole width starts at 3x diameter and decreases to 1.1x over time
+    // maximum hole width starts at 5x diameter and decreases to 1.1x over time
+    let min_hole_size = (sprite_height * 1.1) + (sprite_height * 1.9) / (1.0 + hole_index / 10.0);
+    let max_hole_size = (sprite_height * 1.1) + (sprite_height * 3.9) / (1.0 + hole_index / 10.0);
 
     let half_hole_size = rng.0.gen_range(min_hole_size..=max_hole_size.min(min_hole_size)) / 2.0;
 
@@ -121,46 +270,22 @@ fn spawn_wall(
     let delta_h = rng.0.gen_range(-delta_h_max..=delta_h_max);
 
     // the hole should never extend beyond the window
-    let half_window_height = window.height() / 2.0;
     let h_limit = (half_window_height - half_hole_size - 20.0).max(0.0);
     let h = (previous_hole.height + delta_h).clamp(-h_limit, h_limit);
 
-    debug!("hole: {} -> {}", h - half_hole_size, h + half_hole_size);
+    let bottom_of_hole = h - half_hole_size;
+    let top_of_hole = h + half_hole_size;
+
+    debug!("hole: {} -> {}", bottom_of_hole, top_of_hole);
 
     previous_hole.height = h;
     previous_hole.index += 1;
 
-    // let wall_height = window.height();
-    let wall_spawn_x = window.width() / 2.0 + WALL_WIDTH;
+    let bottom_left_corner = Vec2::new(half_window_width + WALL_WIDTH, top_of_hole);
+    spawn_top_wall(&mut commands, bottom_left_corner, texture.clone(), texture_atlas_layout.clone(), half_window_height);
 
-    fn wall(
-        commands: &mut Commands,
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<ColorMaterial>,
-        transform: Transform,
-        wall_height: f32,
-    ) {
-        let rectangle = Rectangle::new(WALL_WIDTH, wall_height);
-
-        commands.spawn((
-            MaterialMesh2dBundle {
-                mesh: Mesh2dHandle(meshes.add(rectangle)),
-                material: materials.add(Color::RED),
-                transform,
-                ..default()
-            },
-            Wall {
-                rectangle,
-                bounding_box: rectangle.aabb_2d(transform.translation.truncate(), 0.0),
-            }
-        ));
-    }
-
-    let top_wall = Transform::from_xyz(wall_spawn_x, half_window_height + half_hole_size + h, 0.0);
-    wall(&mut commands, &mut meshes, &mut materials, top_wall, half_window_height * 2.0);
-
-    let bottom_wall = Transform::from_xyz(wall_spawn_x, -half_window_height - half_hole_size + h, 0.0);
-    wall(&mut commands, &mut meshes, &mut materials, bottom_wall, half_window_height * 2.0);
+    let top_left_corner = Vec2::new(half_window_width + WALL_WIDTH, bottom_of_hole);
+    spawn_bottom_wall(&mut commands, top_left_corner, texture.clone(), texture_atlas_layout.clone(), half_window_height);
 }
 
 const WALL_SPEED: f32 = -4.0;
@@ -170,7 +295,8 @@ fn move_walls(
 ) {
     for (mut transform, mut wall) in walls.iter_mut() {
         transform.translation.x += WALL_SPEED;
-        wall.bounding_box = wall.rectangle.aabb_2d(transform.translation.truncate(), 0.0);
+        wall.center.x += WALL_SPEED;
+        wall.bounding_box = wall.rectangle.aabb_2d(wall.center, 0.0);
     }
 }
 
