@@ -95,19 +95,18 @@ fn setup(
 
 #[derive(Component)]
 struct AnimationConfig {
-    first_sprite_index: usize,
-    last_sprite_index: usize,
+    sprite_indices: Vec<usize>,
     current_sprite_index: usize,
     fps: u8,
     frame_timer: Timer,
 }
 
 impl AnimationConfig {
-    fn new(first: usize, last: usize, fps: u8) -> Self {
+    fn new(sprite_indices: Vec<usize>, fps: u8) -> Self {
+        assert!(sprite_indices.len() > 0);
         Self {
-            first_sprite_index: first,
-            last_sprite_index: last,
-            current_sprite_index: first,
+            sprite_indices,
+            current_sprite_index: 0,
             fps,
             frame_timer: Self::timer_from_fps(fps),
         }
@@ -124,10 +123,12 @@ fn spawn_sprite(
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     let texture = asset_server.load("bird.png");
-    let layout = TextureAtlasLayout::from_grid(Vec2::new(64.0, 64.0), 4, 1, None, None);
+    let layout = TextureAtlasLayout::from_grid(Vec2::new(64.0, 64.0), 8, 1, None, None);
     let texture_atlas_layout = texture_atlas_layouts.add(layout);
 
-    let animation_config = AnimationConfig::new(0, 3, 24);
+    let sprite_indices: Vec<usize> = vec![0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0];
+
+    let animation_config = AnimationConfig::new(sprite_indices, 24);
 
     commands.spawn((
         SpriteSheetBundle {

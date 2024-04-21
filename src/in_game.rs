@@ -53,10 +53,10 @@ fn flap(
         velocity.0.y = IMPULSE;
     }
     animation.frame_timer = AnimationConfig::timer_from_fps(animation.fps);
-    animation.current_sprite_index = animation.first_sprite_index;
+    animation.current_sprite_index = 0;
 }
 
-const WALL_WIDTH: f32 = 100.0;
+const WALL_WIDTH: f32 = 128.0;
 
 fn update_bounding_circle(
     mut player: Query<(&Transform, &mut Player)>,
@@ -237,12 +237,12 @@ fn execute_animations(
     for (mut config, mut atlas) in &mut query {
         config.frame_timer.tick(time.delta());
         if config.frame_timer.just_finished() {
-            if config.current_sprite_index == config.last_sprite_index {
-                atlas.index = config.first_sprite_index;
-                config.current_sprite_index = config.first_sprite_index;
+            if config.current_sprite_index == config.sprite_indices.len() - 1 {
+                atlas.index = 0;
+                config.current_sprite_index = 0;
             } else {
                 config.current_sprite_index += 1;
-                atlas.index = config.current_sprite_index;
+                atlas.index = config.sprite_indices[config.current_sprite_index];
                 config.frame_timer = AnimationConfig::timer_from_fps(config.fps);
             }
         }
