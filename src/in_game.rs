@@ -18,7 +18,7 @@ pub fn plugin(app: &mut App) {
     app
         .add_systems(OnEnter(GameState::InProgress), (unpause_time, reset_score, reset_sprite, despawn_all_walls, reset_hole_info, reset_rng))
         .add_systems(Update, (track_high_score, execute_animations).run_if(in_state(GameState::InProgress)))
-        .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_bounding_circle, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
+        .add_systems(FixedUpdate, (gravity, hit_ground, move_walls, update_player_bounds, hit_wall, cleared_wall).run_if(in_state(GameState::InProgress)))
         .add_systems(FixedUpdate, spawn_wall.run_if(in_state(GameState::InProgress).and_then(on_timer(WALL_INTERVAL))))
         .add_systems(Update, flap.run_if(in_state(GameState::InProgress).and_then(input_just_pressed(MouseButton::Left).or_else(just_touched()))))
         // .add_systems(PostUpdate, debug_bounds)
@@ -58,11 +58,12 @@ fn flap(
 
 const WALL_WIDTH: f32 = 128.0;
 
-fn update_bounding_circle(
+fn update_player_bounds(
     mut player: Query<(&Transform, &mut Player)>,
 ) {
     let (transform, mut player) = player.single_mut();
-    player.bounding_circle.center = transform.translation.truncate();
+    player.body.center = transform.translation.truncate() + Vec2::new(27.0, -27.0); // fine-tuned
+    player.head.center = transform.translation.truncate() + Vec2::new(47.0, 25.0); // fine-tuned
 }
 
 // fn debug_bounds(
@@ -71,7 +72,8 @@ fn update_bounding_circle(
 //     walls: Query<&Wall>,
 // ) {
 //     let player = players.single();
-//     gizmos.circle_2d(player.bounding_circle.center, player.bounding_circle.circle.radius, Color::RED);
+//     gizmos.circle_2d(player.body.center, player.body.circle.radius, Color::RED);
+//     gizmos.circle_2d(player.head.center, player.head.circle.radius, Color::RED);
 //
 //     for wall in walls.iter() {
 //         let bottom_left = wall.bounding_box.min;
@@ -105,7 +107,7 @@ fn reset_rng(
     rng.0 = ChaCha8Rng::seed_from_u64(RANDOM_SEED)
 }
 
-const SPRITE_SIZE: f32 = 128.0; // px
+const TILE_SIZE: f32 = 128.0; // px
 
 /// Walls are spawned with a hole size and a hole height `h`.
 ///
@@ -155,7 +157,7 @@ fn spawn_wall(
         commands.spawn((
             SpatialBundle {
                 transform: Transform {
-                    translation: (top_left_corner + Vec2::new(WALL_WIDTH / 2.0, -SPRITE_SIZE / 2.0)).extend(0.0),
+                    translation: (top_left_corner + Vec2::new(WALL_WIDTH / 2.0, -TILE_SIZE / 2.0)).extend(0.0),
                     ..default()
                 },
                 ..default()
@@ -177,7 +179,7 @@ fn spawn_wall(
                 }
             );
 
-            let mut bottom_of_wall = top_left_corner.y - SPRITE_SIZE;
+            let mut bottom_of_wall = top_left_corner.y - TILE_SIZE;
 
             while bottom_of_wall > -half_window_height {
                 parent.spawn(
@@ -192,7 +194,7 @@ fn spawn_wall(
                     }
                 );
 
-                bottom_of_wall -= SPRITE_SIZE;
+                bottom_of_wall -= TILE_SIZE;
             }
         });
     }
@@ -209,7 +211,7 @@ fn spawn_wall(
         commands.spawn((
             SpatialBundle {
                 transform: Transform {
-                    translation: (bottom_left_corner + Vec2::splat(SPRITE_SIZE / 2.0)).extend(0.0),
+                    translation: (bottom_left_corner + Vec2::splat(TILE_SIZE / 2.0)).extend(0.0),
                     ..default()
                 },
                 ..default()
@@ -231,7 +233,7 @@ fn spawn_wall(
                 }
             );
 
-            let mut top_of_wall = bottom_left_corner.y + SPRITE_SIZE;
+            let mut top_of_wall = bottom_left_corner.y + TILE_SIZE;
 
             while top_of_wall < half_window_height {
                 parent.spawn(
@@ -246,7 +248,7 @@ fn spawn_wall(
                     }
                 );
 
-                top_of_wall += SPRITE_SIZE;
+                top_of_wall += TILE_SIZE;
             }
         });
     }
@@ -255,7 +257,7 @@ fn spawn_wall(
     let half_window_height = window.height() / 2.0;
     let half_window_width = window.width() / 2.0;
 
-    let sprite_height = player.single().bounding_circle.radius() * 2.0;
+    let sprite_height = player.single().body.radius() * 5.0; // fine-tuned
     let hole_index = previous_hole.index as f32;
 
     // minimum hole width starts at 3x diameter and decreases to 1.1x over time
@@ -321,7 +323,7 @@ fn hit_ground(
     let (transform, player) = player.single_mut();
     let window = windows.single();
 
-    if transform.translation.y < -window.height() / 2.0 + player.bounding_circle.circle.radius {
+    if transform.translation.y < -window.height() / 2.0 + 2.0 * player.body.circle.radius { // fine-tuned
         next_state.set(GameState::GameOver);
     }
 }
@@ -334,7 +336,7 @@ fn hit_wall(
     let player = player.single();
 
     for wall in walls.iter() {
-        if player.bounding_circle.intersects(&wall.bounding_box) {
+        if player.body.intersects(&wall.bounding_box) || player.head.intersects(&wall.bounding_box) {
             next_state.set(GameState::GameOver);
         }
     }

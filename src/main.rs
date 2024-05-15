@@ -154,11 +154,13 @@ fn reset_sprite(
     let window = windows.single();
     let (mut transform, mut velocity, mut player) = player.single_mut();
 
-    let translation = Vec3::new(-window.width() / 2.0 + 2.0 * player.bounding_circle.circle.radius, 0.0, 0.0);
+    let x = -window.width() / 2.0 + 4.0 * player.body.circle.radius; // fine-tuned
+    let translation = Vec3::new(x, 0.0, 0.0);
 
     transform.translation = translation;
     velocity.0 = Vec2::default();
-    player.bounding_circle = Circle::new(64.).bounding_circle(translation.truncate(), 0.0);
+    player.body = Circle::new(32.).bounding_circle(translation.truncate(), 0.0); // fine-tuned
+    player.head = Circle::new(32.).bounding_circle(translation.truncate(), 0.0); // fine-tuned
 }
 
 fn lock_sprite_x_position(
@@ -168,12 +170,13 @@ fn lock_sprite_x_position(
     let window = windows.single();
     let (mut transform, mut player) = player.single_mut();
 
-    let x = -window.width() / 2.0 + 2.0 * player.bounding_circle.circle.radius;
-    let y = player.bounding_circle.center.y;
+    let x = -window.width() / 2.0 + 4.0 * player.body.circle.radius; // fine-tuned
+    let y = player.body.center.y;
     let translation = Vec3::new(x, y, 0.0);
 
     transform.translation = translation;
-    player.bounding_circle = Circle::new(64.).bounding_circle(translation.truncate(), 0.0);
+    player.body = Circle::new(32.).bounding_circle(translation.truncate(), 0.0); // fine-tuned
+    player.head = Circle::new(32.).bounding_circle(translation.truncate(), 0.0); // fine-tuned
 }
 
 #[derive(Component)]
@@ -184,16 +187,21 @@ struct Velocity(Vec2);
 
 #[derive(Component)]
 struct Player {
-    bounding_circle: BoundingCircle,
+    head: BoundingCircle,
+    body: BoundingCircle,
 }
 
 impl Default for Player {
     fn default() -> Self {
         Self {
-            bounding_circle: BoundingCircle {
+            head: BoundingCircle {
                 center: Vec2::new(0.0, 0.0),
                 circle: Circle::new(0.0),
-            }
+            },
+            body: BoundingCircle {
+                center: Vec2::new(0.0, 0.0),
+                circle: Circle::new(0.0),
+            },
         }
     }
 }
